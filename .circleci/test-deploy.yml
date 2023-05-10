@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  <orb-name>: <namespace>/<orb-name>@dev:<<pipeline.git.revision>>
+  git-release-information: cropster/git-release-information@dev:<<pipeline.git.revision>>
   orb-tools: circleci/orb-tools@11.5
 
 filters: &filters
@@ -12,11 +12,13 @@ jobs:
   # You may want to add additional validation steps to ensure the commands are working as expected.
   command-tests:
     docker:
-      - image: cimg/base:current
+      - image: cimg/base:2023.03
     steps:
       - checkout
       # Run your orb's commands to validate them.
-      - <orb-name>/greet
+      - git-release-information/install_mergestat
+      - git-release-information/send_release_commit_list
+
 workflows:
   test-deploy:
     jobs:
@@ -26,7 +28,7 @@ workflows:
       - orb-tools/pack:
           filters: *filters
       - orb-tools/publish:
-          orb-name: <namespace>/<orb-name>
+          orb-name: cropster/git-release-information
           vcs-type: << pipeline.project.type >>
           pub-type: production
           requires:

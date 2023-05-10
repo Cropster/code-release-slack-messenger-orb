@@ -1,13 +1,13 @@
 description: >
-  Sample example description.
-# Provide a use-case based example for using this orb.
-# Everything in the `usage` section will be displayed in the orb registry.
-# Comments are not retained.
+  Example of the job commit_list_notification. The goal is to fetch a list of all the release commits and send the info via Slack
 usage:
   version: 2.1
   orbs:
-    <orb-name>: <namespace>/<orb-name>@1.2.3
+    git-release-information: cropster/git-release-information@1.2.3
   workflows:
-    use-my-orb:
+    fetch-and-send-release-commit-list:
       jobs:
-        - <orb-name>/<job-name>
+        - git-release-information/commit_list_notification:
+            name: Send commit list via Slack and store it in an artifact
+            repo_name: Infrastructure     
+            slack_channel: SLACK_WEBHOOK_URL	

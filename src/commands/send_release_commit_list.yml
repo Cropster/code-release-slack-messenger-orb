@@ -1,0 +1,61 @@
+description: >
+  This command fetches the list of commits of the last tagged release and sends them to a Slack channel.
+parameters:
+  repo_name:
+    type: string
+    default: "NO-REPO"
+    description: "Name of the repo present in the message header"
+  slack_channel:
+    type: env_var_name
+    default: "RELEASE_INFO_SLACK_URL"
+    description: "Channel where the full commit list will be sent"
+steps:
+  - run:
+      name: Store commit list as an artifact and send it via Slack
+      command: |
+        #Data retrieval to get the first commit of the code version being released
+        latest_tagged_released_version=$(mergestat "SELECT name FROM refs('/home/circleci/project') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[0].name' | sed 's|[v,]||g')
+        reference_old_version=$(mergestat "SELECT name FROM refs('/home/circleci/project') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[1].name')
+
+        first_commit_rv=$(git log --pretty=oneline $reference_old_version | awk '{print $1}' | head -n 1 || true) #Force exit 0 to avoid SIGPIPE exit code 141
+        first_commit_rv_date=$(git show -s --format=%ci $first_commit_rv || true) #Force exit 0 to avoid SIGPIPE exit code 141
+        formatted_rv_date="$(echo $first_commit_rv_date | head -n1 | awk '{print $1;}')"T"$(echo $first_commit_rv_date | head -n1 | awk '{print $2;}')"+01:00
+
+        #Artifact creation: ASCII table containing the list of all release's commits
+        mkdir ./artifacts
+        slack_artifact_header="# ----- Releasing C-SAR <<parameters.repo_name>> $latest_tagged_released_version with the following changes:  ------- #"
+        echo "$slack_artifact_header" >> ./artifacts/commit_info_file.txt
+        commit_table="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 ")"
+        echo "$commit_table" >> ./artifacts/commit_info_file.txt
+
+        #Slack message payload creation with the same info as the artifact
+        slack_message_header=":rocket: Releasing C-SAR <<parameters.repo_name>> $latest_tagged_released_version with the following changes:"
+        commit_list="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 " --format json | jq -sR | sed -e 's/\\//g' -e 's/^.\(.*\).$/\1/' -e 's/ "/ /g' -e 's/" / /g' -e 's/"n/ /g')"
+        slack_message_body=$(echo "{\"blocks\": [{\"type\": \"header\",\"text\": {\"type\": \"plain_text\",\"text\": \"$slack_message_header\"}},{\"type\": \"divider\"}," )
+
+        # Dynamic json structure creation for every existing commit
+        for row in $(echo "${commit_list}" | jq -r '.[] | @base64')
+        do
+            author=$(echo ${row} | base64 --decode | jq -r '.author_name' )
+            time=$(echo ${row} | base64 --decode | jq -r '.commit_timestamp' )
+            time_fmt=$(date -d"$time" +"%a %d %b %Y %H:%M:%S UTC" )
+            message=$(echo ${row} | base64 --decode | jq -r '.message' | tr -d \''"\')
+            message="${message%?}"
+            ticket_number=$(echo ${message} | awk '{print $1}' | sed 's/://g')
+
+            if [[ "$message" == *"CSAR"* ]] || [[ "$message" == *"INF"* ]] || [[ "$message" == *"DEVTASKS"* ]] || [[ "$message" == *"CCF"* ]]
+            then 
+              ticket_number=$(echo ${message} | awk '{print $1}' | sed 's/://g')
+              jira_ticket="<https://cropster.atlassian.net/browse/$ticket_number| $message>"
+            else
+              jira_ticket="$message"
+            fi
+
+            # For every element of the commit, create the json message structure
+            single_commit_info=$(printf  "%s" "
+            {\"type\": \"section\",\"text\": {\"type\": \"mrkdwn\",\"text\": \"$jira_ticket \n$author, $time_fmt \"}},{\"type\": \"divider\"},")
+            slack_message_body="${slack_message_body}${single_commit_info}"
+        done
+        slack_message_body="${slack_message_body%?}]}" #Last formatting step to match commas and brackets
+        echo $slack_message_body
+        curl -X POST -H 'Content-type: application/json' --data  "$slack_message_body" <<parameters.slack_channel>>

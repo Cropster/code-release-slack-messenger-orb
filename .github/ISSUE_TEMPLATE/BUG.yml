@@ -16,7 +16,7 @@ body:
     attributes:
       label: "Orb version"
       description: |
-        Which version of `<namespace>/<orb-name>` are you using?
+        Which version of `cropster/git-release-information` are you using?
       placeholder: "1.0.0"
 
   - type: textarea

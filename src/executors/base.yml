@@ -1,0 +1,6 @@
+description: >
+  Docker executor for Base image
+
+resource_class: small
+docker:
+  - image: 'cimg/base:2023.03'
