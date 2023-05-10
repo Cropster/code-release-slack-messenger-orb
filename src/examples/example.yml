@@ -3,7 +3,7 @@ description: >
 usage:
   version: 2.1
   orbs:
-    git-release-information: cropster/git-release-information@1.2.3
+    git-release-information: cropster/git-release-information@1.0.0
   workflows:
     fetch-and-send-release-commit-list:
       jobs:

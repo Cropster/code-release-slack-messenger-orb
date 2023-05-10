@@ -1,7 +1,7 @@
 version: 2.1
 
 description: >
-  Thi orb uses Meregstat and Git to list all the commits included in a code release, to then send the result to Slack, via webhook.
+  This orb uses Mergestat and Git to list all the commits included in a code release, to then send the result to Slack, via webhook.
 # What will your orb allow users to accomplish?
 # Descriptions should be short, simple, and informative.
 
