@@ -22,6 +22,7 @@ workflows:
           filters: *filters
       - orb-tools/publish:
           orb-name: cropster/git-release-information
+          pub_type: production
           vcs-type: << pipeline.project.type >>
           requires:
             [orb-tools/lint, orb-tools/review, orb-tools/pack, shellcheck/check]
