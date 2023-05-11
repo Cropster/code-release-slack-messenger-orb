@@ -6,4 +6,3 @@ steps:
       command: |
         wget https://github.com/mergestat/mergestat-lite/releases/download/v0.6.0/mergestat-linux-amd64.tar.gz
         sudo tar -xzf mergestat-linux-amd64.tar.gz -C /usr/local/bin/
-        
