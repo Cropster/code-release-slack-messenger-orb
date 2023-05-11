@@ -10,20 +10,22 @@ filters: &filters
 jobs:
   # Create a job to test the commands of your orbs.
   # You may want to add additional validation steps to ensure the commands are working as expected.
-  command-tests:
+  command-test:
     docker:
       - image: cimg/base:2023.03
     steps:
       - checkout
       # Run your orb's commands to validate them.
       - git-release-information/install_mergestat
-      - git-release-information/send_release_commit_list
+      - git-release-information/send_release_commit_list:
+          repo_name: Infrastructure     
+          slack_channel: SLACK_WEBHOOK_URL	
 
 workflows:
   test-deploy:
     jobs:
       # Make sure to include "filters: *filters" in every test job you want to run as part of your deployment.
-      - command-tests:
+      - command-test:
           filters: *filters
       - orb-tools/pack:
           filters: *filters
@@ -33,8 +35,8 @@ workflows:
           pub-type: production
           requires:
             - orb-tools/pack
-            - command-tests
-          context: <publishing-context>
+            - command-test
+          context: orb-publishing
           filters:
             branches:
               ignore: /.*/

@@ -14,9 +14,9 @@ parameters:
     description: "Channel where the full commit list will be sent"
 steps:
   - checkout
-  - git-release-information/install_mergestat
-  - git-release-information/send_release_commit_list:
-      repo_name: << parameters.repo_name >>      
+  - install_mergestat
+  - send_release_commit_list:
+      repo_name: << parameters.repo_name >>
       slack_channel: << parameters.slack_channel >>
   - store_artifacts:
       path: /home/circleci/project/artifacts
