@@ -6,8 +6,8 @@ parameters:
     default: "NO-REPO"
     description: "Name of the repo present in the message header"
   slack_channel:
-    type: env_var_name
-    default: "RELEASE_INFO_SLACK_URL"
+    type: string
+    default: "$SLACK_WEBHOOK_URL	"
     description: "Channel where the full commit list will be sent"
 steps:
   - run:
