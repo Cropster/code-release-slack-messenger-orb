@@ -9,5 +9,5 @@ usage:
       jobs:
         - git-release-information/commit_list_notification:
             name: Send commit list via Slack and store it in an artifact
-            repo_name: Infrastructure     
-            slack_channel: SLACK_WEBHOOK_URL	
+            repo_name: Infrastructure
+            slack_channel: $SLACK_WEBHOOK_URL

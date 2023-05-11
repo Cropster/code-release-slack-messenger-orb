@@ -1,22 +1,20 @@
 description: >
   Fetch a list of all the release commits and send the info via Slack
-
 executor: base
-
 parameters:
   repo_name:
     type: string
     default: "NO-REPO"
     description: "Name of the repo present in the message header"
   slack_channel:
-    type: env_var_name
-    default: "RELEASE_INFO_SLACK_URL"
+    type: string
+    default: "$SLACK_WEBHOOK_URL"
     description: "Channel where the full commit list will be sent"
 steps:
   - checkout
-  - git-release-information/install_mergestat
-  - git-release-information/send_release_commit_list:
-      repo_name: << parameters.repo_name >>      
+  - install_mergestat
+  - send_release_commit_list:
+      repo_name: << parameters.repo_name >>
       slack_channel: << parameters.slack_channel >>
   - store_artifacts:
       path: /home/circleci/project/artifacts
