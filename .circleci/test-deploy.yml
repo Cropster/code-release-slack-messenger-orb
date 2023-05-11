@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  git-release-information: cropster/git-release-information@latest:<<pipeline.git.revision>>
+  git-release-information: cropster/git-release-information@$CIRCLE_TAG
   orb-tools: circleci/orb-tools@11.5
 
 filters: &filters
