@@ -1,8 +1,6 @@
 description: >
   Fetch a list of all the release commits and send the info via Slack
-
 executor: base
-
 parameters:
   repo_name:
     type: string
