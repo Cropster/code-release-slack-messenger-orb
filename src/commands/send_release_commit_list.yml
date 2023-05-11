@@ -13,23 +13,22 @@ steps:
   - run:
       name: Store commit list as an artifact and send it via Slack
       command: |
-        #Data retrieval to get the first commit of the code version being released
+        #Fetch the last tagged code version and the timestamp of the previous version's last commit
         latest_tagged_released_version=$(mergestat "SELECT name FROM refs('/home/circleci/project') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[0].name' | sed 's|[v,]||g')
         reference_old_version=$(mergestat "SELECT name FROM refs('/home/circleci/project') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[1].name')
-
         first_commit_rv=$(git log --pretty=oneline $reference_old_version | awk '{print $1}' | head -n 1 || true) #Force exit 0 to avoid SIGPIPE exit code 141
         first_commit_rv_date=$(git show -s --format=%ci $first_commit_rv || true) #Force exit 0 to avoid SIGPIPE exit code 141
         formatted_rv_date="$(echo $first_commit_rv_date | head -n1 | awk '{print $1;}')"T"$(echo $first_commit_rv_date | head -n1 | awk '{print $2;}')"+01:00
 
-        #Artifact creation: ASCII table containing the list of all release's commits
+        #Artifact creation: ASCII table containing the list of latest release's commits, starting right after the previous version's last commit timestamp.
         mkdir ./artifacts
-        slack_artifact_header="# ----- Releasing C-SAR <<parameters.repo_name>> $latest_tagged_released_version with the following changes:  ------- #"
+        slack_artifact_header="# ----- Releasing <<parameters.repo_name>> $latest_tagged_released_version with the following changes:  ------- #"
         echo "$slack_artifact_header" >> ./artifacts/commit_info_file.txt
         commit_table="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 ")"
         echo "$commit_table" >> ./artifacts/commit_info_file.txt
 
-        #Slack message payload creation with the same info as the artifact
-        slack_message_header=":rocket: Releasing C-SAR <<parameters.repo_name>> $latest_tagged_released_version with the following changes:"
+        #Slack message payload creation with the same data as the artifact
+        slack_message_header=":rocket: Releasing <<parameters.repo_name>> $latest_tagged_released_version with the following changes:"
         commit_list="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 " --format json | jq -sR | sed -e 's/\\//g' -e 's/^.\(.*\).$/\1/' -e 's/ "/ /g' -e 's/" / /g' -e 's/"n/ /g')"
         slack_message_body=$(echo "{\"blocks\": [{\"type\": \"header\",\"text\": {\"type\": \"plain_text\",\"text\": \"$slack_message_header\"}},{\"type\": \"divider\"}," )
 

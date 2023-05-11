@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  git-release-information: cropster/git-release-information@dev:<<pipeline.git.revision>>
+  git-release-information: cropster/git-release-information@latest:<<pipeline.git.revision>>
   orb-tools: circleci/orb-tools@11.5
 
 filters: &filters
@@ -30,8 +30,8 @@ workflows:
       - orb-tools/pack:
           filters: *filters
       - orb-tools/publish:
-          orb-name: cropster/git-release-information
-          vcs-type: << pipeline.project.type >>
+          orb_name: cropster/git-release-information
+          vcs_type: << pipeline.project.type >>
           pub-type: production
           requires:
             - orb-tools/pack

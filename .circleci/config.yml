@@ -1,7 +1,7 @@
 version: 2.1
 setup: true
 orbs:
-  orb-tools: circleci/orb-tools@11.5
+  orb-tools: circleci/orb-tools@12.0.2
   shellcheck: circleci/shellcheck@3.1
 
 filters: &filters
@@ -16,13 +16,14 @@ workflows:
       - orb-tools/pack:
           filters: *filters
       - orb-tools/review:
-          exclude: RC006,RC009
+          exclude: RC006,RC009,RC010
           filters: *filters
       - shellcheck/check:
           filters: *filters
       - orb-tools/publish:
-          orb-name: cropster/git-release-information
-          vcs-type: << pipeline.project.type >>
+          orb_name: cropster/git-release-information
+          pub_type: production
+          vcs_type: << pipeline.project.type >>
           requires:
             [orb-tools/lint, orb-tools/review, orb-tools/pack, shellcheck/check]
           # Use a context to hold your publishing token.
@@ -30,7 +31,8 @@ workflows:
           filters: *filters
       # Triggers the next workflow in the Orb Development Kit.
       - orb-tools/continue:
-          pipeline-number: << pipeline.number >>
-          vcs-type: << pipeline.project.type >>
+          orb_name: cropster/git-release-information
+          pipeline_number: << pipeline.number >>
+          vcs_type: << pipeline.project.type >>
           requires: [orb-tools/publish]
           filters: *filters
