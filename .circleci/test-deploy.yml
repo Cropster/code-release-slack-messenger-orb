@@ -19,7 +19,7 @@ jobs:
       - git-release-information/install_mergestat
       - git-release-information/send_release_commit_list:
           repo_name: Infrastructure     
-          slack_channel: SLACK_WEBHOOK_URL	
+          slack_channel: $SLACK_WEBHOOK_URL	
 
 workflows:
   test-deploy:
