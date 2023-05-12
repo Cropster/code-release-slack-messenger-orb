@@ -22,13 +22,13 @@ steps:
 
         #Artifact creation: ASCII table containing the list of latest release's commits, starting right after the previous version's last commit timestamp.
         mkdir ./artifacts
-        slack_artifact_header="# ----- Releasing <<parameters.repo_name>> $latest_tagged_released_version with the following changes:  ------- #"
+        slack_artifact_header="# ----- Releasing C-SAR <<parameters.repo_name>> $latest_tagged_released_version with the following changes:  ------- #"
         echo "$slack_artifact_header" >> ./artifacts/commit_info_file.txt
         commit_table="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 ")"
         echo "$commit_table" >> ./artifacts/commit_info_file.txt
 
         #Slack message payload creation with the same data as the artifact
-        slack_message_header=":rocket: Releasing <<parameters.repo_name>> $latest_tagged_released_version with the following changes:"
+        slack_message_header=":rocket: Releasing C-SAR <<parameters.repo_name>> $latest_tagged_released_version with the following changes:"
         commit_list="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 " --format json | jq -sR | sed -e 's/\\//g' -e 's/^.\(.*\).$/\1/' -e 's/ "/ /g' -e 's/" / /g' -e 's/"n/ /g')"
         slack_message_body=$(echo "{\"blocks\": [{\"type\": \"header\",\"text\": {\"type\": \"plain_text\",\"text\": \"$slack_message_header\"}},{\"type\": \"divider\"}," )
 
