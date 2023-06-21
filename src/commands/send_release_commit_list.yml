@@ -13,6 +13,9 @@ steps:
   - run:
       name: Store commit list as an artifact and send it via Slack
       command: |
+        #Install bc if it's not already installed
+        sudo apt-get install bc
+
         #Fetch the last tagged code version and the timestamp of the previous version's last commit
         latest_tagged_released_version=$(mergestat "SELECT name FROM refs('/home/circleci/project') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[0].name' | sed 's|[v,]||g')
         reference_old_version=$(mergestat "SELECT name FROM refs('/home/circleci/project') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[1].name')
