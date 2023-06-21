@@ -56,5 +56,64 @@ steps:
             slack_message_body="${slack_message_body}${single_commit_info}"
         done
         slack_message_body="${slack_message_body%?}]}" #Last formatting step to match commas and brackets
-        echo $slack_message_body
-        curl -X POST -H 'Content-type: application/json' --data  "$slack_message_body" <<parameters.slack_channel>>
+
+        #Treatment of large messages (more than 50 json blocks)
+        header_count=`grep -o "header" <<< "$slack_message_body" | wc -l`
+        section_count=`grep -o "section" <<< "$slack_message_body" | wc -l`
+        divider_count=`grep -o "divider" <<< "$slack_message_body" | wc -l`
+        blocks=$(($header_count+$section_count+$divider_count))
+        messages_needed="scale=3; $blocks/50" | bc -l
+        rounded_mesages=$(((blocks+49)/50))
+
+        # Json blocks are less than 50
+        if [[ $rounded_mesages -eq 1 ]]
+        then
+          echo $slack_message_body
+          echo "Sending only one message to Slack..."
+          curl -X POST -H 'Content-type: application/json' --data  "$slack_message_body" <<parameters.slack_channel>>
+        fi
+
+        # Json blocks are more than 50
+        if [[ $rounded_mesages -eq 2 ]]
+        then
+          #First, the payload is splitted in three equal parts
+          echo "The message contains $blocks blocks, payload splited in three"
+          first_split_index=$((${#slack_message_body}/3))
+          first_splitted_message=${slack_message_body:$first_split_index}
+          second_split_index=$(((${#slack_message_body}/3)*2))
+          second_split_message=${slack_message_body:$second_split_index}
+
+          #The beginning of the closest json block after each splitting point is found, to match the JSON structure
+          block_divider='{"type": "section"'  
+          rel_first_split_offset_index=${first_split_message%%$block_divider*} 
+          split_first_block_index=$((${#rel_first_split_offset_index} + $first_split_index))
+          rel_second_split_offset_index=${second_split_message%%$block_divider*}
+          split_second_block_index=$((${#rel_second_split_offset_index} + $second_split_index))
+          second_block_length=$(($split_second_block_index-$split_first_block_index))
+
+          #The payload gets splitted twice, to create 3 blocks. Then, each block gets their limits set to match the JSON structure
+          echo "First block index end: $split_first_block_index"
+          echo "Second block index end: $split_second_block_index"
+          echo "Second block length: $second_block_length"
+
+          # First part of the message
+          first_block=${slack_message_body:0:$split_first_block_index}"]}"
+          first_block=$(echo $first_block) #Needed to format the message 
+          echo $first_block
+          echo "Sending first part of the message to Slack..."
+          curl -X POST -H 'Content-type: application/json' --data  "$first_block" <<parameters.slack_channel>>
+
+          # Second part of the message
+          second_block=${slack_message_body:$split_first_block_index:$second_block_length}"]}"
+          second_block=$(echo "{\"blocks\":[$second_block")
+          echo $second_block
+          echo "Sending second part of the message to Slack..."
+          curl -X POST -H 'Content-type: application/json' --data  "$second_block" <<parameters.slack_channel>>
+
+          # Third part of the message
+          third_block=${slack_message_body:$split_second_block_index}
+          third_block=$(echo "{\"blocks\":[$third_block")
+          echo $third_block
+          echo "Sending third part of the message to Slack..."
+          curl -X POST -H 'Content-type: application/json' --data  "$third_block" <<parameters.slack_channel>>
+        fi
