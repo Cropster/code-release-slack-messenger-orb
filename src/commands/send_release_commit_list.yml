@@ -58,9 +58,9 @@ steps:
         slack_message_body="${slack_message_body%?}]}" #Last formatting step to match commas and brackets
 
         #Treatment of large messages (more than 50 json blocks)
-        header_count=`grep -o "header" <<< "$slack_message_body" | wc -l`
-        section_count=`grep -o "section" <<< "$slack_message_body" | wc -l`
-        divider_count=`grep -o "divider" <<< "$slack_message_body" | wc -l`
+        header_count=`grep -o "header" \<<< "$slack_message_body" | wc -l`
+        section_count=`grep -o "section" \<<< "$slack_message_body" | wc -l`
+        divider_count=`grep -o "divider" \<<< "$slack_message_body" | wc -l`
         blocks=$(($header_count+$section_count+$divider_count))
         messages_needed="scale=3; $blocks/50" | bc -l
         rounded_mesages=$(((blocks+49)/50))
@@ -84,8 +84,8 @@ steps:
           second_split_message=${slack_message_body:$second_split_index}
 
           #The beginning of the closest json block after each splitting point is found, to match the JSON structure
-          block_divider='{"type": "section"'  
-          rel_first_split_offset_index=${first_split_message%%$block_divider*} 
+          block_divider='{"type": "section"'
+          rel_first_split_offset_index=${first_split_message%%$block_divider*}
           split_first_block_index=$((${#rel_first_split_offset_index} + $first_split_index))
           rel_second_split_offset_index=${second_split_message%%$block_divider*}
           split_second_block_index=$((${#rel_second_split_offset_index} + $second_split_index))
@@ -98,7 +98,7 @@ steps:
 
           # First part of the message
           first_block=${slack_message_body:0:$split_first_block_index}"]}"
-          first_block=$(echo $first_block) #Needed to format the message 
+          first_block=$(echo $first_block) #Needed to format the message
           echo $first_block
           echo "Sending first part of the message to Slack..."
           curl -X POST -H 'Content-type: application/json' --data  "$first_block" <<parameters.slack_channel>>
