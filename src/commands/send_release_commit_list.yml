@@ -68,10 +68,13 @@ steps:
         messages_needed="scale=3; $blocks/50" | bc -l
         rounded_mesages=$(((blocks+49)/50))
 
+        # Echo the whole message payload for debugging
+        echo "Complete Slack message JSON:"
+        echo $slack_message_body
+
         # Json blocks are less than 50
         if [[ $rounded_mesages -eq 1 ]]
         then
-          echo $slack_message_body
           echo "Sending only one message to Slack..."
           curl -X POST -H 'Content-type: application/json' --data  "$slack_message_body" <<parameters.slack_channel>>
         fi
