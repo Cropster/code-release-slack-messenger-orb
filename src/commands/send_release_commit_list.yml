@@ -90,7 +90,7 @@ steps:
           second_split_message=${slack_message_body:$second_split_index}
 
           #The beginning of the closest json block after each splitting point is found, to match the JSON structure
-          block_divider='{"type": "section"'  
+          block_divider='{"type": "section"'
           rel_first_split_offset_index=$(echo $first_splitted_message | grep -b -o '{"type": "section"' | awk 'BEGIN {FS=":"}{print $1; exit}')
           rel_second_split_offset_index=$(echo $second_split_message | grep -b -o '{"type": "section"' | awk 'BEGIN {FS=":"}{print $1; exit}')
           split_first_block_index=$(( ${first_split_index} + ${rel_first_split_offset_index}))
@@ -104,7 +104,7 @@ steps:
 
           # First part of the message
           first_block=${slack_message_body:0:$split_first_block_index}"]}"
-          first_block=$(echo $first_block) #Needed to format the message 
+          first_block=$(echo $first_block) #Needed to format the messag
           echo "Sending first part of the message to Slack..."
           echo $first_block
           curl -X POST -H 'Content-type: application/json' --data  "$first_block" <<parameters.slack_channel>>
