@@ -16,23 +16,48 @@ steps:
         #Install bc if it's not already installed
         sudo apt update && sudo apt-get install bc
 
-        #Fetch the last tagged code version and the timestamp of the previous version's last commit
-        latest_tagged_released_version=$(mergestat "SELECT name FROM refs('/home/circleci/project') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[0].name' | sed 's|[v,]||g')
-        reference_old_version=$(mergestat "SELECT name FROM refs('/home/circleci/project') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[1].name')
-        first_commit_rv=$(git log --pretty=oneline $reference_old_version | awk '{print $1}' | head -n 1 || true) #Force exit 0 to avoid SIGPIPE exit code 141
+        #Fetch the two latest tagged versions from the repository
+        latest_tagged_version=$(mergestat "SELECT name FROM refs('/Users/luisrojo/git/cropster-csar-frontend') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[0].name' | sed 's|[v,]||g')
+        reference_old_feature_version=$(mergestat "SELECT name FROM refs('/Users/luisrojo/git/cropster-csar-frontend') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[1].name')
+
+        #Identify if it's a Hotfix release
+        patch_version=$(echo $latest_tagged_version | awk -F'.' '{print $3}')
+        echo "Patch version: $patch_version"
+        if [[ $patch_version -gt 0 ]]
+        then
+          echo "This is a Hotfix release"
+          is_hotfix=true
+        else
+          #If it's a feature release, the previous feature version is calculated
+          echo "This is a Feature release"
+          is_hotfix=false
+          major_version=$(echo $latest_tagged_version | awk -F'.' '{print $1}')
+          latest_minor_feature_version=$(echo $latest_tagged_version | awk -F'.' '{print $2}')
+          previous_minor_feature_version=$((latest_minor_feature_version - 1))
+          echo "The previous feature version is $major_version.$previous_minor_feature_version.0"
+          reference_old_feature_version=$(echo v"$major_version.$previous_minor_feature_version".0)
+        fi
+
+        first_commit_rv=$(git log --pretty=oneline $reference_old_feature_version | awk '{print $1}' | head -n 1 || true) #Force exit 0 to avoid SIGPIPE exit code 141
         first_commit_rv_date=$(git show -s --format=%ci $first_commit_rv || true) #Force exit 0 to avoid SIGPIPE exit code 141
         formatted_rv_date="$(echo $first_commit_rv_date | head -n1 | awk '{print $1;}')"T"$(echo $first_commit_rv_date | head -n1 | awk '{print $2;}')"+01:00
 
         #Artifact creation: ASCII table containing the list of latest release's commits, starting right after the previous version's last commit timestamp.
         mkdir ./artifacts
-        slack_artifact_header="# ----- Releasing C-SAR <<parameters.repo_name>> $latest_tagged_released_version with the following changes:  ------- #"
+        slack_artifact_header="# ----- Releasing <<parameters.repo_name>> $latest_tagged_version with the following changes:  ------- #"
         echo "$slack_artifact_header" >> ./artifacts/commit_info_file.txt
         commit_table="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 ")"
         echo "$commit_table" >> ./artifacts/commit_info_file.txt
 
         #Slack message payload creation with the same data as the artifact
-        slack_message_header=":rocket: Releasing C-SAR <<parameters.repo_name>> $latest_tagged_released_version with the following changes:"
-        commit_list="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 " --format json | jq -sR | sed -e 's/\\//g' -e 's/^.\(.*\).$/\1/' -e 's/ "/ /g' -e 's/" / /g' -e 's/"n/ /g')"
+        slack_message_header=":rocket: Releasing <<parameters.repo_name>> $latest_tagged_version with the following changes:"
+
+        if [[ $is_hotfix == true ]]
+        then
+          commit_list="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents LIMIT 1 < 2 " --format json | jq -sR | sed -e 's/\\//g' -e 's/^.\(.*\).$/\1/' -e 's/ "/ /g' -e 's/" / /g' -e 's/"n/ /g')"
+        else
+          commit_list="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 " --format json | jq -sR | sed -e 's/\\//g' -e 's/^.\(.*\).$/\1/' -e 's/ "/ /g' -e 's/" / /g' -e 's/"n/ /g')"
+        fi
         slack_message_body=$(echo "{\"blocks\": [{\"type\": \"header\",\"text\": {\"type\": \"plain_text\",\"text\": \"$slack_message_header\"}},{\"type\": \"divider\"}," )
 
         # Dynamic json structure creation for every existing commit
@@ -60,6 +85,10 @@ steps:
         done
         slack_message_body="${slack_message_body%?}]}" #Last formatting step to match commas and brackets
 
+        # Echo the whole message payload for debugging
+        echo "Complete Slack message JSON:"
+        echo $slack_message_body
+
         #Treatment of large messages (more than 50 json blocks)
         header_count=`grep -o "header" \<<< "$slack_message_body" | wc -l`
         section_count=`grep -o "section" \<<< "$slack_message_body" | wc -l`
@@ -67,10 +96,6 @@ steps:
         blocks=$(($header_count+$section_count+$divider_count))
         messages_needed="scale=3; $blocks/50" | bc -l
         rounded_mesages=$(((blocks+49)/50))
-
-        # Echo the whole message payload for debugging
-        echo "Complete Slack message JSON:"
-        echo $slack_message_body
 
         # Json blocks are less than 50
         if [[ $rounded_mesages -eq 1 ]]
@@ -104,7 +129,7 @@ steps:
 
           # First part of the message
           first_block=${slack_message_body:0:$split_first_block_index}"]}"
-          first_block=$(echo $first_block) #Needed to format the messag
+          first_block=$(echo $first_block) #Needed to format the message
           echo "Sending first part of the message to Slack..."
           echo $first_block
           curl -X POST -H 'Content-type: application/json' --data  "$first_block" <<parameters.slack_channel>>
