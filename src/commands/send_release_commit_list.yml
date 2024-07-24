@@ -97,6 +97,10 @@ steps:
         messages_needed="scale=3; $blocks/50" | bc -l
         rounded_mesages=$(((blocks+49)/50))
 
+        # Echo the whole message payload for debugging
+        echo "Complete Slack message JSON:"
+        echo $slack_message_body
+
         # Json blocks are less than 50
         if [[ $rounded_mesages -eq 1 ]]
         then
@@ -130,6 +134,7 @@ steps:
           # First part of the message
           first_block=${slack_message_body:0:$split_first_block_index}"]}"
           first_block=$(echo $first_block) #Needed to format the message
+
           echo "Sending first part of the message to Slack..."
           echo $first_block
           curl -X POST -H 'Content-type: application/json' --data  "$first_block" <<parameters.slack_channel>>
