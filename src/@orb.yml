@@ -1,15 +1,14 @@
 version: 2.1
 
 description: >
-  This orb uses Mergestat and Git log to list all the commits included in the latest tagged code version of the release, to then send the structured result to Slack, via webhook.
-# What will your orb allow users to accomplish?
-# Descriptions should be short, simple, and informative.
+  Publish the commit list for the latest tagged release to a Slack channel.
 
-# This information will be displayed in the orb registry and is not mandatory.
+  The orb resolves the two most recent release tags using git's version sort,
+  takes the exact commit range between them, and renders it as Slack Block Kit
+  messages, splitting automatically to stay inside Slack's 50-block limit. The
+  same list is stored as a build artifact. Optionally turns Jira issue keys
+  found in commit subjects into links.
+
 display:
   home_url: "https://www.cropster.com/"
   source_url: "https://github.com/Cropster/code-release-slack-messenger-orb"
-
-# If your orb requires other orbs, you can import them like this. Otherwise remove the "orbs" stanza.
-# orbs:
-#  hello: circleci/hello-build@0.0.5

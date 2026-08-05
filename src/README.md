@@ -1,26 +1,44 @@
-# Git Release Information Orb
+# Orb source layout
 
-Orbs are shipped as individual `orb.yml` files, however, to make development easier, it is possible to author an orb in _unpacked_ form, which can be _packed_ with the CircleCI CLI and published.
+Orbs ship as a single packed `orb.yml`, but are authored here in _unpacked_
+form and packed by the CircleCI CLI:
 
-The default `.circleci/config.yml` file contains the configuration code needed to automatically pack, test, and deploy any changes made to the contents of the orb source in this directory.
+```bash
+circleci orb pack src | circleci orb validate -
+```
 
-## @orb.yml
+| Path | Contents |
+|---|---|
+| `@orb.yml` | Entry point: `version`, `description`, `display` |
+| `commands/` | One file per command; the filename is the command name |
+| `jobs/` | One file per job |
+| `executors/` | One file per executor |
+| `examples/` | Usage examples rendered on the orb registry page |
+| `scripts/` | Shell scripts inlined into commands via `<<include()>>` |
 
-This is the entry point for our orb "tree", which becomes our `orb.yml` file later.
+## scripts/
 
-Within the `@orb.yml` we generally specify 4 configuration keys
+Command logic lives in `scripts/` rather than inline in YAML for two reasons:
+`shellcheck` can lint a real `.sh` file, and the script can be executed
+directly by `tests/run_tests.sh` without packing or publishing the orb.
 
-**Keys**
+A command pulls one in with an include directive, whose path is relative to
+this `src/` directory:
 
-1. **version**
-    Specify version 2.1 for orb-compatible configuration `version: 2.1`
-2. **description**
-    The goal is to fetch a list of all the release commits and send the info via Slack
-3. **display**
-    Specify the `home_url` referencing documentation or product URL, and `source_url` linking to the orb's source repository.
-4. **orbs**
-    (optional) Some orbs may depend on other orbs. Import them here.
+```yaml
+steps:
+  - run:
+      name: Send release commit list to Slack
+      environment:
+        RELEASE_REPO_NAME: "<< parameters.repo_name >>"
+      command: <<include(scripts/send_release_commit_list.sh)>>
+```
 
-## See:
- - [Orb Author Intro](https://circleci.com/docs/2.0/orb-author-intro/#section=configuration)
- - [Reusable Configuration](https://circleci.com/docs/2.0/reusing-config)
+Parameters are passed through the `environment:` block rather than substituted
+into the command text. A parameter value therefore arrives as data in an
+environment variable and is never evaluated as shell code.
+
+## See also
+
+- [Orb author intro](https://circleci.com/docs/orb-author-intro/)
+- [Reusable configuration reference](https://circleci.com/docs/reusing-config/)

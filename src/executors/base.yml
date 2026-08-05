@@ -1,6 +1,18 @@
 description: >
-  Docker executor for Base image
+  Docker executor built on cimg/base, which already provides git, jq and curl.
 
-resource_class: small
+parameters:
+  tag:
+    type: string
+    default: "2026.07"
+    description: >
+      cimg/base image tag. See https://hub.docker.com/r/cimg/base/tags
+  resource_class:
+    type: string
+    default: small
+    description: >
+      CircleCI resource class for the job.
+
+resource_class: << parameters.resource_class >>
 docker:
-  - image: 'cimg/base:2023.03'
+  - image: cimg/base:<< parameters.tag >>

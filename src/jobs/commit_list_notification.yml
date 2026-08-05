@@ -1,20 +1,99 @@
 description: >
-  Fetch a list of all the release commits and send the info via Slack
-executor: base
+  Check out the repository, work out which commits belong to the latest tagged
+  release, post them to Slack, and store the plain-text list as an artifact.
+
+executor:
+  name: base
+  tag: << parameters.executor_tag >>
+
 parameters:
+  executor_tag:
+    type: string
+    default: "2026.07"
+    description: >
+      cimg/base image tag used to run the job.
   repo_name:
     type: string
-    default: "NO-REPO"
-    description: "Name of the repo present in the message header"
-  slack_channel:
+    default: ""
+    description: >
+      Repository label shown in the message header.
+  product_label:
     type: string
-    default: "$SLACK_WEBHOOK_URL"
-    description: "Channel where the full commit list will be sent"
+    default: ""
+    description: >
+      Optional product prefix shown before the repository name in the header.
+  slack_webhook_env_var:
+    type: env_var_name
+    default: SLACK_WEBHOOK_URL
+    description: >
+      Name of the environment variable holding the Slack incoming webhook URL.
+  tag_pattern:
+    type: string
+    default: "v*"
+    description: >
+      Glob matched against tag names when looking for release tags.
+  strict_semver_tags:
+    type: boolean
+    default: true
+    description: >
+      Consider only tags shaped like vX.Y.Z or X.Y.Z.
+  jira_base_url:
+    type: string
+    default: ""
+    description: >
+      Base browse URL for issue links, with no trailing slash. Empty disables
+      linking.
+  jira_project_keys:
+    type: string
+    default: ""
+    description: >
+      Comma or space separated Jira project keys to link.
+  trigger_tag:
+    type: string
+    default: ""
+    description: >
+      The tag this release is for. When empty, $CIRCLE_TAG is used.
+  artifact_dir:
+    type: string
+    default: "./artifacts"
+    description: >
+      Directory the plain-text commit list is written to and stored from.
+  blocks_per_message:
+    type: integer
+    default: 45
+    description: >
+      Maximum Slack blocks per message, between 1 and 50.
+  fetch_tags:
+    type: boolean
+    default: true
+    description: >
+      Run "git fetch --tags --force" before resolving the release range.
+  send_delay:
+    type: integer
+    default: 1
+    description: >
+      Seconds to wait between messages when more than one is needed.
+  dry_run:
+    type: boolean
+    default: false
+    description: >
+      Build and print the payloads without posting them.
+
 steps:
   - checkout
-  - install_mergestat
   - send_release_commit_list:
       repo_name: << parameters.repo_name >>
-      slack_channel: << parameters.slack_channel >>
+      product_label: << parameters.product_label >>
+      slack_webhook_env_var: << parameters.slack_webhook_env_var >>
+      tag_pattern: << parameters.tag_pattern >>
+      strict_semver_tags: << parameters.strict_semver_tags >>
+      jira_base_url: << parameters.jira_base_url >>
+      jira_project_keys: << parameters.jira_project_keys >>
+      trigger_tag: << parameters.trigger_tag >>
+      artifact_dir: << parameters.artifact_dir >>
+      blocks_per_message: << parameters.blocks_per_message >>
+      fetch_tags: << parameters.fetch_tags >>
+      send_delay: << parameters.send_delay >>
+      dry_run: << parameters.dry_run >>
   - store_artifacts:
-      path: /home/circleci/project/artifacts
+      path: << parameters.artifact_dir >>

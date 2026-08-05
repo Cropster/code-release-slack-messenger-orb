@@ -1,13 +1,28 @@
 description: >
-  Example of the job commit_list_notification. The goal is to fetch a list of all the release commits and send the info via Slack
+  Post the commit list for the latest tagged release to Slack and keep a copy as
+  a build artifact. The workflow is filtered to tag pushes, so the notification
+  is sent exactly once per release rather than on every branch build.
+
 usage:
   version: 2.1
   orbs:
-    git-release-information: cropster/git-release-information@1.0.0
+    git-release-information: cropster/git-release-information@2.0.0
   workflows:
     fetch-and-send-release-commit-list:
       jobs:
         - git-release-information/commit_list_notification:
             name: Send commit list via Slack and store it in an artifact
             repo_name: Infrastructure
-            slack_channel: $SLACK_WEBHOOK_URL
+            product_label: C-SAR
+            # Only the variable NAME goes in the config; set the value as a
+            # project or context environment variable.
+            slack_webhook_env_var: SLACK_WEBHOOK_URL
+            jira_base_url: "https://your-org.atlassian.net/browse"
+            jira_project_keys: "CSAR, INF, DEVTASKS, CCF"
+            context: slack-notifications
+            # A release notification only makes sense on a release tag.
+            filters:
+              branches:
+                ignore: /.*/
+              tags:
+                only: /^v[0-9]+\.[0-9]+\.[0-9]+$/

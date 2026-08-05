@@ -1,157 +1,115 @@
 description: >
-  This command fetches the list of commits of the last tagged release and sends them to a Slack channel.
+  Collect the commits belonging to the latest tagged release and post them to a
+  Slack incoming webhook, writing a plain-text copy to a build artifact.
+
+  The release is the range between the two most recent release tags, resolved
+  with git's own version sort, so the commit set is exact and free of any
+  timestamp or timezone guesswork. Messages are split automatically to stay
+  within Slack's 50-block limit, and a rejected message fails the job.
+
+  Requires git, jq and curl, all of which are present in cimg/base.
+
 parameters:
   repo_name:
     type: string
-    default: "NO-REPO"
-    description: "Name of the repo present in the message header"
-  slack_channel:
+    default: ""
+    description: >
+      Repository label shown in the message header. When empty, a generic
+      label is used.
+  product_label:
     type: string
-    default: "$SLACK_WEBHOOK_URL	"
-    description: "Channel where the full commit list will be sent"
+    default: ""
+    description: >
+      Optional product prefix shown before the repository name in the header,
+      for example "C-SAR".
+  slack_webhook_env_var:
+    type: env_var_name
+    default: SLACK_WEBHOOK_URL
+    description: >
+      Name of the environment variable that holds the Slack incoming webhook
+      URL. Only the name is stored in your config, so the URL itself stays out
+      of the rendered configuration and is masked in job output. Set the value
+      as a project or context environment variable.
+  tag_pattern:
+    type: string
+    default: "v*"
+    description: >
+      Glob matched against tag names when looking for release tags.
+  strict_semver_tags:
+    type: boolean
+    default: true
+    description: >
+      Consider only tags shaped like vX.Y.Z or X.Y.Z. This keeps release
+      candidates and moving tags such as "nightly" out of the calculation. Set
+      to false to accept any tag matching tag_pattern.
+  jira_base_url:
+    type: string
+    default: ""
+    description: >
+      Base browse URL for issue links, with no trailing slash, for example
+      "https://your-org.atlassian.net/browse". Leave empty to disable linking.
+  jira_project_keys:
+    type: string
+    default: ""
+    description: >
+      Comma or space separated Jira project keys to link, for example
+      "CSAR, INF, DEVTASKS, CCF". The first matching key found anywhere in a
+      commit subject is linked. Requires jira_base_url to also be set.
+  trigger_tag:
+    type: string
+    default: ""
+    description: >
+      The tag this release is for. When empty, $CIRCLE_TAG is used, so a
+      tag-triggered pipeline announces the tag it was triggered by rather than
+      whichever tag sorts highest. Falls back to the highest matching tag when
+      neither is set.
+  artifact_dir:
+    type: string
+    default: "./artifacts"
+    description: >
+      Directory the plain-text commit list is written to.
+  blocks_per_message:
+    type: integer
+    default: 45
+    description: >
+      Maximum Slack blocks per message, between 1 and 50. Slack rejects
+      messages with more than 50 blocks; the default leaves headroom.
+  fetch_tags:
+    type: boolean
+    default: true
+    description: >
+      Run "git fetch --tags --force" first. CircleCI's checkout does not always
+      bring every tag, and the release range cannot be computed without them. A
+      failed fetch is reported as a warning, not an error.
+  send_delay:
+    type: integer
+    default: 1
+    description: >
+      Seconds to wait between messages when more than one is needed. Slack
+      rate limits incoming webhooks to roughly one message per second.
+  dry_run:
+    type: boolean
+    default: false
+    description: >
+      Build and print the payloads without posting them. Useful for validating
+      the command in CI without sending real notifications; no webhook URL is
+      required in this mode.
+
 steps:
   - run:
-      name: Store commit list as an artifact and send it via Slack
-      command: |
-        #Install bc if it's not already installed
-        sudo apt update && sudo apt-get install bc
-
-        #Fetch the two latest tagged versions from the repository
-        latest_tagged_version=$(mergestat "SELECT name FROM refs('/Users/luisrojo/git/cropster-csar-frontend') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[0].name' | sed 's|[v,]||g')
-        reference_old_feature_version=$(mergestat "SELECT name FROM refs('/Users/luisrojo/git/cropster-csar-frontend') WHERE type = 'tag' AND name LIKE '%.%' ORDER BY name DESC LIMIT 2" --format json | jq -r '.[1].name')
-
-        #Identify if it's a Hotfix release
-        patch_version=$(echo $latest_tagged_version | awk -F'.' '{print $3}')
-        echo "Patch version: $patch_version"
-        if [[ $patch_version -gt 0 ]]
-        then
-          echo "This is a Hotfix release"
-          is_hotfix=true
-        else
-          #If it's a feature release, the previous feature version is calculated
-          echo "This is a Feature release"
-          is_hotfix=false
-          major_version=$(echo $latest_tagged_version | awk -F'.' '{print $1}')
-          latest_minor_feature_version=$(echo $latest_tagged_version | awk -F'.' '{print $2}')
-          previous_minor_feature_version=$((latest_minor_feature_version - 1))
-          echo "The previous feature version is $major_version.$previous_minor_feature_version.0"
-          reference_old_feature_version=$(echo v"$major_version.$previous_minor_feature_version".0)
-        fi
-
-        first_commit_rv=$(git log --pretty=oneline $reference_old_feature_version | awk '{print $1}' | head -n 1 || true) #Force exit 0 to avoid SIGPIPE exit code 141
-        first_commit_rv_date=$(git show -s --format=%ci $first_commit_rv || true) #Force exit 0 to avoid SIGPIPE exit code 141
-        formatted_rv_date="$(echo $first_commit_rv_date | head -n1 | awk '{print $1;}')"T"$(echo $first_commit_rv_date | head -n1 | awk '{print $2;}')"+01:00
-
-        #Artifact creation: ASCII table containing the list of latest release's commits, starting right after the previous version's last commit timestamp.
-        mkdir ./artifacts
-        slack_artifact_header="# ----- Releasing <<parameters.repo_name>> $latest_tagged_version with the following changes:  ------- #"
-        echo "$slack_artifact_header" >> ./artifacts/commit_info_file.txt
-        commit_table="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 ")"
-        echo "$commit_table" >> ./artifacts/commit_info_file.txt
-
-        #Slack message payload creation with the same data as the artifact
-        slack_message_header=":rocket: Releasing <<parameters.repo_name>> $latest_tagged_version with the following changes:"
-
-        if [[ $is_hotfix == true ]]
-        then
-          commit_list="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents LIMIT 1 < 2 " --format json | jq -sR | sed -e 's/\\//g' -e 's/^.\(.*\).$/\1/' -e 's/ "/ /g' -e 's/" / /g' -e 's/"n/ /g')"
-        else
-          commit_list="$(mergestat "SELECT message, author_name, hash, committer_when as commit_timestamp FROM commits WHERE committer_when > '$formatted_rv_date' AND commits.parents < 2 " --format json | jq -sR | sed -e 's/\\//g' -e 's/^.\(.*\).$/\1/' -e 's/ "/ /g' -e 's/" / /g' -e 's/"n/ /g')"
-        fi
-        slack_message_body=$(echo "{\"blocks\": [{\"type\": \"header\",\"text\": {\"type\": \"plain_text\",\"text\": \"$slack_message_header\"}},{\"type\": \"divider\"}," )
-
-        # Dynamic json structure creation for every existing commit
-        for row in $(echo "${commit_list}" | jq -r '.[] | @base64')
-        do
-            author=$(echo ${row} | base64 --decode | jq -r '.author_name' )
-            time=$(echo ${row} | base64 --decode | jq -r '.commit_timestamp' )
-            time_fmt=$(date -d"$time" +"%a %d %b %Y %H:%M:%S UTC" )
-            message=$(echo ${row} | base64 --decode | jq -r '.message' | tr -d \''"\')
-            message="${message%?}"
-            ticket_number=$(echo ${message} | awk '{print $1}' | sed 's/://g')
-
-            if [[ "$message" == *"CSAR"* ]] || [[ "$message" == *"INF"* ]] || [[ "$message" == *"DEVTASKS"* ]] || [[ "$message" == *"CCF"* ]]
-            then
-              ticket_number=$(echo ${message} | awk '{print $1}' | sed 's/://g')
-              jira_ticket="<https://cropster.atlassian.net/browse/$ticket_number| $message>"
-            else
-              jira_ticket="$message"
-            fi
-
-            # For every element of the commit, create the json message structure
-            single_commit_info=$(printf  "%s" "
-            {\"type\": \"section\",\"text\": {\"type\": \"mrkdwn\",\"text\": \"$jira_ticket \n$author, $time_fmt \"}},{\"type\": \"divider\"},")
-            slack_message_body="${slack_message_body}${single_commit_info}"
-        done
-        slack_message_body="${slack_message_body%?}]}" #Last formatting step to match commas and brackets
-
-        # Echo the whole message payload for debugging
-        echo "Complete Slack message JSON:"
-        echo $slack_message_body
-
-        #Treatment of large messages (more than 50 json blocks)
-        header_count=`grep -o "header" \<<< "$slack_message_body" | wc -l`
-        section_count=`grep -o "section" \<<< "$slack_message_body" | wc -l`
-        divider_count=`grep -o "divider" \<<< "$slack_message_body" | wc -l`
-        blocks=$(($header_count+$section_count+$divider_count))
-        messages_needed="scale=3; $blocks/50" | bc -l
-        rounded_mesages=$(((blocks+49)/50))
-
-        # Echo the whole message payload for debugging
-        echo "Complete Slack message JSON:"
-        echo $slack_message_body
-
-        # Json blocks are less than 50
-        if [[ $rounded_mesages -eq 1 ]]
-        then
-          echo "Sending only one message to Slack..."
-          curl -X POST -H 'Content-type: application/json' --data  "$slack_message_body" <<parameters.slack_channel>>
-        fi
-
-        # Json blocks are more than 50
-        if [[ $rounded_mesages -eq 2 ]]
-        then
-          #First, the payload is splitted in three equal parts
-          echo "The message contains $blocks blocks, payload splited in three"
-          first_split_index=$((${#slack_message_body}/3))
-          first_splitted_message=${slack_message_body:$first_split_index}
-          second_split_index=$(((${#slack_message_body}/3)*2))
-          second_split_message=${slack_message_body:$second_split_index}
-
-          #The beginning of the closest json block after each splitting point is found, to match the JSON structure
-          block_divider='{"type": "section"'
-          rel_first_split_offset_index=$(echo $first_splitted_message | grep -b -o '{"type": "section"' | awk 'BEGIN {FS=":"}{print $1; exit}')
-          rel_second_split_offset_index=$(echo $second_split_message | grep -b -o '{"type": "section"' | awk 'BEGIN {FS=":"}{print $1; exit}')
-          split_first_block_index=$(( ${first_split_index} + ${rel_first_split_offset_index}))
-          split_second_block_index=$(( ${second_split_index} + ${rel_second_split_offset_index}))
-          second_block_length=$(($split_second_block_index-$split_first_block_index))
-
-          #The payload gets splitted twice, to create 3 blocks. Then, each block gets their limits set to match the JSON structure
-          echo "First block index end: $split_first_block_index"
-          echo "Second block index end: $split_second_block_index"
-          echo "Third block index end: ${#slack_message_body}"
-
-          # First part of the message
-          first_block=${slack_message_body:0:$split_first_block_index}"]}"
-          first_block=$(echo $first_block) #Needed to format the message
-
-          echo "Sending first part of the message to Slack..."
-          echo $first_block
-          curl -X POST -H 'Content-type: application/json' --data  "$first_block" <<parameters.slack_channel>>
-          echo "\n"
-
-          # Second part of the message
-          second_block=${slack_message_body:$split_first_block_index:$second_block_length}"]}"
-          second_block=$(echo "{\"blocks\":[$second_block")
-          echo "Sending second part of the message to Slack..."
-          echo $second_block
-          curl -X POST -H 'Content-type: application/json' --data  "$second_block" <<parameters.slack_channel>>
-          echo "\n"
-
-          # Third part of the message
-          third_block=${slack_message_body:$split_second_block_index}
-          third_block=$(echo "{\"blocks\":[$third_block")
-          echo "Sending third part of the message to Slack..."
-          echo $third_block
-          curl -X POST -H 'Content-type: application/json' --data  "$third_block" <<parameters.slack_channel>>
-        fi
+      name: Send release commit list to Slack
+      environment:
+        RELEASE_REPO_NAME: "<< parameters.repo_name >>"
+        RELEASE_PRODUCT_LABEL: "<< parameters.product_label >>"
+        RELEASE_WEBHOOK_ENV_VAR: "<< parameters.slack_webhook_env_var >>"
+        RELEASE_TAG_PATTERN: "<< parameters.tag_pattern >>"
+        RELEASE_STRICT_SEMVER: "<< parameters.strict_semver_tags >>"
+        RELEASE_JIRA_BASE_URL: "<< parameters.jira_base_url >>"
+        RELEASE_JIRA_KEYS: "<< parameters.jira_project_keys >>"
+        RELEASE_TRIGGER_TAG: "<< parameters.trigger_tag >>"
+        RELEASE_ARTIFACT_DIR: "<< parameters.artifact_dir >>"
+        RELEASE_BLOCKS_PER_MSG: "<< parameters.blocks_per_message >>"
+        RELEASE_FETCH_TAGS: "<< parameters.fetch_tags >>"
+        RELEASE_SEND_DELAY: "<< parameters.send_delay >>"
+        RELEASE_DRY_RUN: "<< parameters.dry_run >>"
+      command: <<include(scripts/send_release_commit_list.sh)>>

@@ -1,12 +1,25 @@
 version: 2.1
 setup: true
+
 orbs:
   orb-tools: circleci/orb-tools@12.0.2
-  shellcheck: circleci/shellcheck@3.1
+  shellcheck: circleci/shellcheck@3.2
 
 filters: &filters
   tags:
     only: /.*/
+
+jobs:
+  # The orb's logic lives in src/scripts/*.sh, so it can be tested directly
+  # without packing or publishing the orb first.
+  script-test:
+    docker:
+      - image: cimg/base:2026.07
+    steps:
+      - checkout
+      - run:
+          name: Run the script test suite
+          command: ./tests/run_tests.sh
 
 workflows:
   lint-pack:
@@ -19,22 +32,29 @@ workflows:
           exclude: RC006,RC009,RC010
           filters: *filters
       - shellcheck/check:
+          # Fail on anything at style severity or worse.
+          severity: style
           filters: *filters
-
-      # Publishing the orb is done manually from Github
-      # - orb-tools/publish:
-      #     orb_name: cropster/git-release-information
-      #     pub_type: production
-      #     vcs_type: << pipeline.project.type >>
-      #     requires:
-      #       [orb-tools/lint, orb-tools/review, orb-tools/pack, shellcheck/check]
-      #     # Use a context to hold your publishing token.
-      #     context: orb-publishing
-      #     filters: *filters
-      # # Triggers the next workflow in the Orb Development Kit.
-      # - orb-tools/continue:
-      #     orb_name: cropster/git-release-information
-      #     pipeline_number: << pipeline.number >>
-      #     vcs_type: << pipeline.project.type >>
-      #     requires: [orb-tools/publish]
-      #     filters: *filters
+      - script-test:
+          filters: *filters
+      # Publish a dev version, then hand off to .circleci/test-deploy.yml.
+      - orb-tools/publish:
+          orb_name: cropster/git-release-information
+          vcs_type: << pipeline.project.type >>
+          pub_type: dev
+          requires:
+            - orb-tools/lint
+            - orb-tools/review
+            - orb-tools/pack
+            - shellcheck/check
+            - script-test
+          context: orb-publishing
+          filters: *filters
+      # Without this, the test-deploy pipeline never runs.
+      - orb-tools/continue:
+          orb_name: cropster/git-release-information
+          pipeline_number: << pipeline.number >>
+          vcs_type: << pipeline.project.type >>
+          requires:
+            - orb-tools/publish
+          filters: *filters
