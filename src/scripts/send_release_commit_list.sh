@@ -12,6 +12,7 @@
 #   RELEASE_WEBHOOK_ENV_VAR  *Name* of the variable holding the webhook URL.
 #   RELEASE_TAG_PATTERN      Glob selecting candidate release tags.
 #   RELEASE_STRICT_SEMVER    "true" keeps only vX.Y.Z / X.Y.Z tags.
+#   RELEASE_SCHEME           previous_minor (default) or previous_tag.
 #   RELEASE_JIRA_BASE_URL    Issue browse URL, no trailing slash. Empty disables links.
 #   RELEASE_JIRA_KEYS        Space/comma separated Jira project keys.
 #   RELEASE_ARTIFACT_DIR     Directory for the plain-text artifact.
@@ -71,6 +72,7 @@ product_label="${RELEASE_PRODUCT_LABEL:-}"
 webhook_env_var="${RELEASE_WEBHOOK_ENV_VAR:-SLACK_WEBHOOK_URL}"
 tag_pattern="${RELEASE_TAG_PATTERN:-v*}"
 strict_semver="${RELEASE_STRICT_SEMVER:-true}"
+release_scheme="${RELEASE_SCHEME:-previous_minor}"
 jira_base_url="${RELEASE_JIRA_BASE_URL:-}"
 jira_keys_raw="${RELEASE_JIRA_KEYS:-}"
 artifact_dir="${RELEASE_ARTIFACT_DIR:-./artifacts}"
@@ -86,6 +88,11 @@ done
 
 require_small_int 'RELEASE_BLOCKS_PER_MSG' "$blocks_per_msg" 1 "$SLACK_MAX_BLOCKS"
 require_small_int 'RELEASE_SEND_DELAY' "$send_delay" 0 3600
+
+case "$release_scheme" in
+    previous_minor | previous_tag) ;;
+    *) die "RELEASE_SCHEME must be 'previous_minor' or 'previous_tag', got '$release_scheme'" ;;
+esac
 
 # Resolve the webhook indirectly so the URL itself never appears in the config,
 # in this script, or in any argument list.
@@ -176,7 +183,55 @@ fi
 
 version="${latest_tag#v}"
 
-if [ -n "$previous_tag" ]; then
+# --- Release scheme ----------------------------------------------------------
+# previous_minor models Cropster's cadence: a patch of 0 is the weekly feature
+# release and spans back to the previous week's release (so hotfixes cut in
+# between are included), while a patch above 0 is a hotfix and reports only its
+# own commit. previous_tag is the plain "since the preceding tag" behaviour.
+is_hotfix=false
+if [ "$release_scheme" = 'previous_minor' ]; then
+    semver="${latest_tag#v}"
+    if printf '%s' "$semver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+        major="${semver%%.*}"
+        rest="${semver#*.}"
+        minor="${rest%%.*}"
+        patch="${rest#*.}"
+        tag_prefix=''
+        case "$latest_tag" in v*) tag_prefix='v' ;; esac
+
+        if [ "$patch" -gt 0 ]; then
+            is_hotfix=true
+            log "Patch version ${patch} > 0: treating ${latest_tag} as a hotfix release"
+        elif [ "$minor" -gt 0 ]; then
+            candidate="${tag_prefix}${major}.$((minor - 1)).0"
+            if printf '%s\n' "$all_tags" | grep -qxF -- "$candidate"; then
+                previous_tag="$candidate"
+                log "Feature release: spanning back to the previous weekly release ${candidate}"
+            else
+                log "WARNING: expected previous weekly release '${candidate}' does not exist; \
+falling back to the preceding tag."
+            fi
+        else
+            log "WARNING: ${latest_tag} has minor version 0, so there is no previous weekly \
+release to span back to; falling back to the preceding tag."
+        fi
+    else
+        log "WARNING: '${latest_tag}' is not a plain X.Y.Z version, so the weekly/hotfix \
+scheme cannot be applied; falling back to the preceding tag."
+    fi
+fi
+
+if [ "$is_hotfix" = 'true' ]; then
+    # Scope to the commits the hotfix actually introduced. Walking from the tag
+    # alone is wrong: when the tag points at a merge, git follows the first
+    # parent and returns a commit that predates the hotfix entirely.
+    if [ -n "$previous_tag" ]; then
+        range="${previous_tag}..${latest_tag}"
+    else
+        range="$latest_tag"
+    fi
+    log "Hotfix release: listing only the newest commit introduced by ${latest_tag}"
+elif [ -n "$previous_tag" ]; then
     range="${previous_tag}..${latest_tag}"
     log "Release range: ${previous_tag} -> ${latest_tag}"
 else
@@ -196,7 +251,11 @@ commits_raw="${work_dir}/commits.txt"
 # names and %s is always collapsed to a single line, so this framing cannot be
 # broken by any byte an author can put in a name or subject -- unlike an
 # in-line delimiter, which a 0x1f in a name would shift.
-git log --no-merges --format='%H%n%an%n%cI%n%ct%n%s' "$range" -- >"$commits_raw"
+if [ "$is_hotfix" = 'true' ]; then
+    git log --no-merges -n 1 --format='%H%n%an%n%cI%n%ct%n%s' "$range" -- >"$commits_raw"
+else
+    git log --no-merges --format='%H%n%an%n%cI%n%ct%n%s' "$range" -- >"$commits_raw"
+fi
 
 line_count="$(grep -c '' "$commits_raw" || true)"
 : "${line_count:=0}"

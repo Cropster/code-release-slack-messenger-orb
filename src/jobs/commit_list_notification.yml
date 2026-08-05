@@ -37,6 +37,14 @@ parameters:
     default: true
     description: >
       Consider only tags shaped like vX.Y.Z or X.Y.Z.
+  release_scheme:
+    type: enum
+    enum: ["previous_minor", "previous_tag"]
+    default: "previous_minor"
+    description: >
+      "previous_minor" treats a patch of 0 as the weekly feature release
+      (spanning back to <major>.<minor - 1>.0) and a patch above 0 as a hotfix
+      reporting only its own commit. "previous_tag" uses the preceding tag.
   jira_base_url:
     type: string
     default: ""
@@ -87,6 +95,7 @@ steps:
       slack_webhook_env_var: << parameters.slack_webhook_env_var >>
       tag_pattern: << parameters.tag_pattern >>
       strict_semver_tags: << parameters.strict_semver_tags >>
+      release_scheme: << parameters.release_scheme >>
       jira_base_url: << parameters.jira_base_url >>
       jira_project_keys: << parameters.jira_project_keys >>
       trigger_tag: << parameters.trigger_tag >>

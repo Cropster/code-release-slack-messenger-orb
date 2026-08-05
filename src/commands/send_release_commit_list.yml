@@ -42,6 +42,21 @@ parameters:
       Consider only tags shaped like vX.Y.Z or X.Y.Z. This keeps release
       candidates and moving tags such as "nightly" out of the calculation. Set
       to false to accept any tag matching tag_pattern.
+  release_scheme:
+    type: enum
+    enum: ["previous_minor", "previous_tag"]
+    default: "previous_minor"
+    description: >
+      How the start of the release range is chosen.
+
+      "previous_minor" follows a weekly-release cadence: a tag whose patch
+      number is 0 is a feature release and spans back to
+      <major>.<minor - 1>.0, so hotfixes cut since the previous weekly release
+      are included; a tag whose patch number is above 0 is a hotfix and reports
+      only its own commit. Falls back to the preceding tag, with a warning, if
+      the version is not X.Y.Z or the expected previous release is missing.
+
+      "previous_tag" simply uses the tag immediately below the release tag.
   jira_base_url:
     type: string
     default: ""
@@ -104,6 +119,7 @@ steps:
         RELEASE_WEBHOOK_ENV_VAR: "<< parameters.slack_webhook_env_var >>"
         RELEASE_TAG_PATTERN: "<< parameters.tag_pattern >>"
         RELEASE_STRICT_SEMVER: "<< parameters.strict_semver_tags >>"
+        RELEASE_SCHEME: "<< parameters.release_scheme >>"
         RELEASE_JIRA_BASE_URL: "<< parameters.jira_base_url >>"
         RELEASE_JIRA_KEYS: "<< parameters.jira_project_keys >>"
         RELEASE_TRIGGER_TAG: "<< parameters.trigger_tag >>"

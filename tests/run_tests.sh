@@ -150,6 +150,7 @@ run_script() {
             RELEASE_ARTIFACT_DIR="$repo/artifacts" \
             RELEASE_TAG_PATTERN="${RELEASE_TAG_PATTERN:-v*}" \
             RELEASE_STRICT_SEMVER="${RELEASE_STRICT_SEMVER:-true}" \
+            RELEASE_SCHEME="${RELEASE_SCHEME:-previous_minor}" \
             RELEASE_FETCH_TAGS=false \
             RELEASE_SEND_DELAY=0 \
             RELEASE_BLOCKS_PER_MSG=45 \
@@ -355,7 +356,10 @@ test_tag_ordering_double_digit() {
         tag "$r" "v0.1.$i"
     done
     start_mock "$WORK/order10-reqs"
-    run_script "$r"
+    # Pinned to previous_tag so this stays a test of version *ordering*: under
+    # the default scheme v0.1.10 has patch > 0 and is a hotfix, which would
+    # mask which tag was chosen as previous.
+    run_script "$r" RELEASE_SCHEME=previous_tag
     check_eq 'exits 0' "$LAST_RC" 0
     check_contains 'picks v0.1.10 as latest, v0.1.9 as previous' "$LAST_OUT" 'v0.1.9 -> v0.1.10'
     check_contains 'header shows 0.1.10' "$(summary | jq -r '.headers[0]')" '0.1.10'
@@ -1102,9 +1106,10 @@ test_bad_jira_base_url_disables_linking() {
     tag "$r" v1.0.0
     commit "$r" 'CSAR-1: a change'
     tag "$r" v1.1.0
-    local u
+    local u i=0
     for u in 'https://ex.com/a|b' 'https://ex.com/a>b' 'not-a-url/browse' 'https://ex.com/a b'; do
-        start_mock "$WORK/badurl-reqs"
+        i=$((i + 1))
+        start_mock "$WORK/badurl-reqs-$i"
         RELEASE_JIRA_BASE_URL="$u" RELEASE_JIRA_KEYS='CSAR' run_script "$r"
         check_eq "exits 0 for base url [$u]" "$LAST_RC" 0
         check_contains "warns for base url [$u]" "$LAST_OUT" 'issue linking is disabled'
@@ -1113,6 +1118,164 @@ test_bad_jira_base_url_disables_linking() {
             "$(summary | jq '[.sections[] | select(startswith("<"))] | length')" 0
         stop_mock
     done
+}
+
+# Build a repo with a weekly release, a hotfix on top, then the next weekly:
+#   v1.2.0  <- previous weekly
+#   v1.2.1  <- hotfix
+#   v1.3.0  <- this weekly
+weekly_repo() {
+    local r="$1"
+    make_repo "$r"
+    commit "$r" 'CSAR-1: before the previous weekly'
+    tag "$r" v1.2.0
+    commit "$r" 'CSAR-2: the hotfix commit'
+    tag "$r" v1.2.1
+    commit "$r" 'CSAR-3: feature work after the hotfix'
+    commit "$r" 'CSAR-4: more feature work'
+    tag "$r" v1.3.0
+}
+
+test_scheme_previous_minor_feature_release() {
+    local r="$WORK/scheme-feature"
+    weekly_repo "$r"
+    start_mock "$WORK/scheme-feature-reqs"
+    run_script "$r" RELEASE_TRIGGER_TAG=v1.3.0
+    local secs
+    secs="$(summary | jq -r '.sections | join("\n")')"
+    check_eq 'exits 0' "$LAST_RC" 0
+    check_contains 'spans back to the previous weekly release' "$LAST_OUT" 'v1.2.0 -> v1.3.0'
+    check_eq 'includes the hotfix plus both feature commits' \
+        "$(summary | jq '.sections | length')" 3
+    check_contains 'hotfix commit included' "$secs" 'CSAR-2: the hotfix commit'
+    check_contains 'first feature commit included' "$secs" 'CSAR-3: feature work after the hotfix'
+    check_contains 'second feature commit included' "$secs" 'CSAR-4: more feature work'
+    check_not_contains 'previous weekly commit excluded' "$secs" 'CSAR-1: before the previous weekly'
+    check_contains 'header shows the release version' "$(summary | jq -r '.headers[0]')" '1.3.0'
+}
+
+test_scheme_previous_minor_hotfix_release() {
+    local r="$WORK/scheme-hotfix"
+    weekly_repo "$r"
+    start_mock "$WORK/scheme-hotfix-reqs"
+    run_script "$r" RELEASE_TRIGGER_TAG=v1.2.1
+    local secs
+    secs="$(summary | jq -r '.sections | join("\n")')"
+    check_eq 'exits 0' "$LAST_RC" 0
+    check_contains 'identifies the hotfix' "$LAST_OUT" 'as a hotfix release'
+    check_eq 'reports exactly one commit' "$(summary | jq '.sections | length')" 1
+    check_contains 'and it is the hotfix commit' "$secs" 'CSAR-2: the hotfix commit'
+    check_contains 'header shows the hotfix version' "$(summary | jq -r '.headers[0]')" '1.2.1'
+    check_eq 'artifact agrees' \
+        "$(grep -oE 'Commits: [0-9]+' "$r/artifacts/commit_info_file.txt" | awk '{print $2}')" 1
+}
+
+test_scheme_previous_tag_differs() {
+    local r="$WORK/scheme-prevtag"
+    weekly_repo "$r"
+    start_mock "$WORK/scheme-prevtag-reqs"
+    run_script "$r" RELEASE_SCHEME=previous_tag RELEASE_TRIGGER_TAG=v1.3.0
+    local secs
+    secs="$(summary | jq -r '.sections | join("\n")')"
+    check_eq 'exits 0' "$LAST_RC" 0
+    check_contains 'uses the immediately preceding tag' "$LAST_OUT" 'v1.2.1 -> v1.3.0'
+    check_eq 'excludes the hotfix commit' "$(summary | jq '.sections | length')" 2
+    check_not_contains 'hotfix commit not included' "$secs" 'CSAR-2: the hotfix commit'
+    check_contains 'feature commits included' "$secs" 'CSAR-3: feature work after the hotfix'
+    stop_mock
+
+    # previous_tag must not apply hotfix handling at all.
+    start_mock "$WORK/scheme-prevtag-hotfix"
+    run_script "$r" RELEASE_SCHEME=previous_tag RELEASE_TRIGGER_TAG=v1.2.1
+    check_eq 'hotfix tag under previous_tag exits 0' "$LAST_RC" 0
+    check_not_contains 'no hotfix special-casing' "$LAST_OUT" 'as a hotfix release'
+    check_contains 'plain preceding-tag range' "$LAST_OUT" 'v1.2.0 -> v1.2.1'
+}
+
+test_scheme_previous_minor_fallbacks() {
+    # minor 0: there is no <major>.<minor-1>.0 to span back to
+    local r="$WORK/scheme-minor0"
+    make_repo "$r"
+    commit "$r" 'CSAR-1: first'
+    tag "$r" v1.9.0
+    commit "$r" 'CSAR-2: after 1.9.0'
+    tag "$r" v2.0.0
+    start_mock "$WORK/scheme-minor0-reqs"
+    run_script "$r" RELEASE_TRIGGER_TAG=v2.0.0
+    check_eq 'minor 0 exits 0' "$LAST_RC" 0
+    check_contains 'warns there is no previous weekly' "$LAST_OUT" 'minor version 0'
+    check_contains 'falls back to the preceding tag' "$LAST_OUT" 'v1.9.0 -> v2.0.0'
+    check_eq 'one commit in range' "$(summary | jq '.sections | length')" 1
+    stop_mock
+
+    # the expected previous weekly release was never tagged
+    local r2="$WORK/scheme-missing"
+    make_repo "$r2"
+    commit "$r2" 'CSAR-1: first'
+    tag "$r2" v1.1.0
+    commit "$r2" 'CSAR-2: after 1.1.0'
+    tag "$r2" v1.3.0
+    start_mock "$WORK/scheme-missing-reqs"
+    run_script "$r2" RELEASE_TRIGGER_TAG=v1.3.0
+    check_eq 'missing previous weekly exits 0' "$LAST_RC" 0
+    check_contains 'warns the expected tag is absent' "$LAST_OUT" 'does not exist'
+    check_contains 'falls back to the preceding tag' "$LAST_OUT" 'v1.1.0 -> v1.3.0'
+    stop_mock
+
+    # non-semver release tag with strict filtering off
+    local r3="$WORK/scheme-nonsemver"
+    make_repo "$r3"
+    commit "$r3" 'CSAR-1: first'
+    tag "$r3" release-a
+    commit "$r3" 'CSAR-2: second'
+    tag "$r3" release-b
+    start_mock "$WORK/scheme-nonsemver-reqs"
+    run_script "$r3" RELEASE_TAG_PATTERN='release-*' RELEASE_STRICT_SEMVER=false
+    check_eq 'non-semver exits 0' "$LAST_RC" 0
+    check_contains 'warns the scheme cannot apply' "$LAST_OUT" 'not a plain X.Y.Z'
+    check_contains 'falls back to the preceding tag' "$LAST_OUT" 'release-a -> release-b'
+}
+
+test_scheme_validation() {
+    local r="$WORK/scheme-bad"
+    weekly_repo "$r"
+    local v i=0
+    for v in nonsense '' PREVIOUS_TAG previous-tag; do
+        i=$((i + 1))
+        # A fresh capture directory per iteration: reusing one would let an
+        # earlier iteration's request satisfy a later "posts nothing" check.
+        start_mock "$WORK/scheme-bad-reqs-$i"
+        run_script "$r" RELEASE_SCHEME="$v"
+        if [ -z "$v" ]; then
+            # empty means unset, so the documented default applies
+            check_eq 'empty release_scheme falls back to the default' "$LAST_RC" 0
+        else
+            check_ne "rejects release_scheme=[$v]" "$LAST_RC" 0
+            check_eq "posts nothing for [$v]" "$(req_count)" 0
+        fi
+        stop_mock
+    done
+}
+
+test_hotfix_with_merge_commit_tag() {
+    # A hotfix tag pointing at a merge commit must still report a real commit.
+    local r="$WORK/hotfix-merge"
+    make_repo "$r"
+    commit "$r" 'CSAR-1: base'
+    tag "$r" v1.2.0
+    git -C "$r" checkout -q -b hotfix
+    commit "$r" 'CSAR-2: the actual fix'
+    git -C "$r" checkout -q main
+    git -C "$r" merge -q --no-ff hotfix -m 'Merge hotfix into main' || die_setup 'merge'
+    tag "$r" v1.2.1
+    start_mock "$WORK/hotfix-merge-reqs"
+    run_script "$r" RELEASE_TRIGGER_TAG=v1.2.1
+    check_eq 'exits 0' "$LAST_RC" 0
+    check_eq 'reports one commit' "$(summary | jq '.sections | length')" 1
+    check_contains 'reports the fix, not the merge' \
+        "$(summary | jq -r '.sections[0]')" 'CSAR-2: the actual fix'
+    check_not_contains 'merge commit not reported' \
+        "$(summary | jq -r '.sections[0]')" 'Merge hotfix'
 }
 
 test_yaml_plumbing_matches_script() {
@@ -1196,6 +1359,12 @@ run_test test_notification_fallback_text_present
 run_test test_header_requests_emoji_rendering
 run_test test_chunks_never_start_with_a_divider
 run_test test_custom_tag_pattern
+run_test test_scheme_previous_minor_feature_release
+run_test test_scheme_previous_minor_hotfix_release
+run_test test_scheme_previous_tag_differs
+run_test test_scheme_previous_minor_fallbacks
+run_test test_scheme_validation
+run_test test_hotfix_with_merge_commit_tag
 run_test test_bad_jira_keys_warn
 run_test test_webhook_never_appears_in_process_args
 run_test test_bad_jira_base_url_disables_linking

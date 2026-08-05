@@ -76,8 +76,24 @@ steps:
    (override with `trigger_tag`), otherwise the highest matching tag. This
    matters for hotfixes: tagging `v1.1.1` on an older branch while `v1.2.0`
    exists still announces `v1.1.1`.
-4. The tag below it becomes the range `previous..latest`; merge commits are
-   excluded. If only one tag exists, the full history up to it is used.
+4. `release_scheme` decides where the range starts. Merge commits are always
+   excluded.
+
+With the default `release_scheme: previous_minor`, given tags
+`v1.2.0`, `v1.2.1`, `v1.3.0`:
+
+| Releasing | Kind | Range | Reported |
+|---|---|---|---|
+| `v1.3.0` | feature (patch `0`) | `v1.2.0..v1.3.0` | everything since the previous weekly, **including** the `v1.2.1` hotfix commit |
+| `v1.2.1` | hotfix (patch > `0`) | `v1.2.0..v1.2.1`, newest only | just the hotfix commit |
+
+With `release_scheme: previous_tag`, releasing `v1.3.0` uses `v1.2.1..v1.3.0`
+and so omits the hotfix commit, and a hotfix tag gets no special handling.
+
+`previous_minor` falls back to the preceding tag, with a warning in the job log,
+when the version is not a plain `X.Y.Z`, when the minor is `0` (there is no
+`<major>.<minor-1>.0`), or when the expected previous release was never tagged.
+If only one tag exists, the full history up to it is used.
 
 Because this is a commit range rather than a timestamp comparison, the commit
 set does not depend on committer timezones, and commits made after the tag are
@@ -94,6 +110,7 @@ Both the job and the command accept the same parameters.
 | `slack_webhook_env_var` | env_var_name | `SLACK_WEBHOOK_URL` | **Name** of the variable holding the webhook URL |
 | `tag_pattern` | string | `v*` | Glob for candidate release tags |
 | `strict_semver_tags` | boolean | `true` | Keep only `vX.Y.Z` / `X.Y.Z` tags |
+| `release_scheme` | enum | `previous_minor` | `previous_minor` (weekly/hotfix aware) or `previous_tag` |
 | `jira_base_url` | string | `""` | Issue browse URL, no trailing slash. Empty disables linking |
 | `jira_project_keys` | string | `""` | Comma/space separated keys to link, e.g. `CSAR, INF` |
 | `trigger_tag` | string | `""` | Tag this release is for; defaults to `$CIRCLE_TAG` |
@@ -132,6 +149,13 @@ Version 2.0.0 is a breaking change.
   `product_label: C-SAR` to keep the previous wording.
 - Recommended: add tag filters to the workflow. Previously the job would run on
   branch pushes and report commits that were not part of any release.
+
+The weekly/hotfix behaviour added in `Develop (#10)` is preserved as the default
+`release_scheme: previous_minor`. Two defects in that version are fixed: the
+mergestat query pointed at a hardcoded local path
+(`/Users/luisrojo/git/cropster-csar-frontend`) that cannot exist in CI, and the
+hotfix query spliced `LIMIT 1` into the middle of its `WHERE` clause, which
+stopped excluding merge commits and left the "last commit" unordered.
 
 ## Development
 
